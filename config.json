@@ -1,0 +1,60 @@
+{
+  "_note": "This file is NOT currently read by the application. It serves as a reference template for default parameters.",
+  "mode": "long_dsRNA",
+  "siRNA": {
+    "min_length": 21,
+    "max_length": 21
+  },
+  "DsiRNA": {
+    "min_length": 27,
+    "max_length": 27
+  },
+  "long_dsRNA": {
+    "min_length": 200,
+    "max_length": 500
+  },
+  "rules": {
+    "consensus": {
+      "enabled": true,
+      "required": true
+    },
+    "reynolds": {
+      "enabled": true
+    },
+    "ui_tei": {
+      "enabled": true
+    },
+    "amarzguioui": {
+      "enabled": false
+    },
+    "hsieh": {
+      "enabled": false
+    },
+    "jagla": {
+      "enabled": false
+    }
+  },
+  "filters": {
+    "gc_min": 30,
+    "gc_max": 52,
+    "exclude_poly_n": 4,
+    "exclude_motifs": [
+      "GU-rich"
+    ]
+  },
+  "off_target": {
+    "level_1_16bp": true,
+    "level_2_20bp": true,
+    "level_3_27bp": false,
+    "seed_7nt": true
+  },
+  "thermodynamics": {
+    "rnaduplex": true,
+    "rnacofold": true,
+    "rnaup_top_n": 20
+  },
+  "parallel": {
+    "n_cores": -1,
+    "batch_size": 100
+  }
+}
