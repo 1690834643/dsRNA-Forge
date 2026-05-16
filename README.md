@@ -100,6 +100,8 @@ dsRNA_Forge/
 
 如果你只想直接使用软件，请下载项目发布页中的 Windows portable 包，解压后双击 `启动 dsRNA-Forge.bat` 或 `dsRNA-Forge.exe`。源码仓库本身不包含 exe。
 
+下载地址：<https://github.com/1690834643/dsRNA-Forge/releases>
+
 ### 开发环境（Linux）
 
 ```bash
