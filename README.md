@@ -17,14 +17,14 @@
 - **长 dsRNA 专用设计逻辑**：预测 Dicer 切割位点，评估 siRNA pool 整体质量
 - **热力学脱靶评估**：内嵌 ViennaRNA；Windows 包自检要求真实 `RNAup-cli` 可用，Top 候选会记录 RNAup 方法
 - **sgRNA 设计模块**：支持 SpCas9 20nt spacer + NGG PAM，扫描正负链，输出 PAM、strand、cut site、on-target score
-- **sgRNA 脱靶排序**：对 NGG-adjacent 近似位点做 mismatch 风险排序，给出 Top off-target 和扩增测序验证方向
+- **sgRNA 脱靶排序**：对当前加载参考序列中的 NRG PAM-adjacent 近似位点做 mismatch 风险排序，给出 Top off-target 和扩增测序验证方向
 - **sgRNA 实验寡核苷酸**：导出 pX330/lentiCRISPR 常见 BbsI 克隆寡核苷酸，以及切点附近基因分型 PCR 引物
 - **无结果诊断**：当候选为 0 或全部被过滤时，会提示可能原因和下一步调整建议
 - **脱靶风险排序**：显示风险等级、风险分、Top 风险转录本和验证方向，导出文件同步包含这些列
 - **非冗余推荐**：默认折叠相邻 1 bp 滑窗候选，展示独立代表结果和 Cluster Size
 - **实验决策面板**：点选结果即可查看推荐理由、扣分原因、脱靶验证片段、区域图和后续验证建议
 - **引物/寡核苷酸设计**：Long dsRNA 自动生成普通 PCR primer 和 T7 promoter primer；sgRNA 自动生成克隆 oligo 和分型 PCR primer
-- **多背景脱靶**：支持额外加载宿主、近缘非靶标或益虫转录组作为脱靶背景
+- **多背景脱靶**：支持额外加载宿主、近缘非靶标、益虫转录组或基因组 FASTA 作为脱靶背景
 - **项目文件和缓存管理**：支持 `.dsforge_project` 保存/打开，以及已入库转录组重命名、删除和清理
 - **三档傻瓜模式**：Strict / Balanced / Relaxed，普通用户无需理解规则和核心数
 - **多核并行**：充分利用现代 CPU，批量设计不卡顿
@@ -153,7 +153,7 @@ pyinstaller dsRNA-Forge.spec
 3. **配置参数**：
    - 普通用户只需要选择设计模式（siRNA / DsiRNA / Long dsRNA / sgRNA）和 Strict / Balanced / Relaxed
    - 长度范围、GC、评分规则和 CPU 核心数放在 "Show advanced settings" 中，默认隐藏
-4. **额外背景**：可选加载宿主、近缘非靶标或益虫 FASTA 作为 off-target 背景
+4. **额外背景**：可选加载宿主、近缘非靶标、益虫或基因组 FASTA 作为 off-target 背景
 5. **开始设计**：点击 "Start Design"
 6. **查看结果**：在 Results 标签页查看排序后的候选列表，点选一行查看解释和验证片段
 7. **导出**：点击 Export CSV / Excel / FASTA / Report / Primers 保存结果
@@ -185,10 +185,10 @@ Windows 发布包随 exe 打入官方 ViennaRNA CLI，运行时自检要求 `RNA
 
 - 默认标准：SpCas9，20nt spacer，NGG PAM。
 - 扫描范围：目标序列正链 NGG 和反链 CCN 都会扫描。
-- 排序依据：on-target heuristic、GC 区间、U6 终止信号、PAM-proximal seed 区域和 off-target 风险。
-- 脱靶输出：Top off-target、mismatch 数、PAM、strand、risk score 和验证方向。
+- 排序依据：on-target heuristic、GC 区间、U6 终止信号、PAM-proximal seed 区域和当前参考范围内的 off-target 风险。
+- 脱靶输出：Top off-target、mismatch 数、PAM、strand、risk score、参考范围说明和验证方向。
 - 实验输出：BbsI 兼容 forward/reverse cloning oligo，以及切点附近 genotyping PCR primer。
-- 注意：当前离线模型是可解释 heuristic，不宣称等同 CRISPOR/CRISPRdirect/CHOPCHOP 的完整在线数据库评分；高价值实验仍建议对 Top off-target 做靶向扩增测序。
+- 注意：sgRNA off-target 只覆盖当前加载的参考/背景 FASTA；如果只加载转录组，不覆盖 intron/intergenic 区域。基因组级 Cas9 脱靶筛查需要加载 genome FASTA 作为参考或额外背景。当前离线模型是可解释 heuristic，不宣称等同 CRISPOR/CRISPRdirect/CHOPCHOP 的完整在线数据库评分；高价值实验仍建议对 Top off-target 做靶向扩增测序。
 
 ## 实验交付输出
 

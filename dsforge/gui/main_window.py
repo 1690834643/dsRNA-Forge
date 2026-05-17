@@ -53,7 +53,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("dsRNA-Forge v0.1.0")
+        self.setWindowTitle("dsRNA-Forge v0.1.1")
         self.setMinimumSize(1400, 900)
 
         self.thread_pool = QThreadPool()

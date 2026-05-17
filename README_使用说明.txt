@@ -46,6 +46,7 @@ dsRNA-Forge Windows 傻瓜式使用说明
 - 默认结果是非冗余推荐：相邻 1 bp 滑窗、重叠度很高的候选会折叠成一条代表结果。
 - Cluster Size 表示这一条代表结果下面折叠了多少个相似候选；数值越大，说明附近有更多等价替代窗口。
 - sgRNA 模式按 SpCas9 20nt spacer + NGG PAM 扫描正负链，结果会显示 PAM、strand、cut site、Top off-target 和验证方向。
+- sgRNA off-target 只覆盖当前加载的参考/背景 FASTA；如果只加载转录组，不覆盖 intron/intergenic 区域。做 Cas9 基因组级脱靶筛查时，请加载 genome FASTA 作为参考或额外背景。
 - sgRNA 模式会导出 BbsI 兼容克隆寡核苷酸，以及切点附近 genotyping PCR 引物；高风险 off-target 建议做靶向扩增测序/ICE/TIDE/Sanger。
 - Export Report 会生成实验验证报告，包含推荐理由、Top 脱靶验证对象、匹配片段、T7 引物、sgRNA oligo/分型引物和方法说明。
 - Export Primers 会导出 T7 引物、sgRNA 克隆寡核苷酸和分型 PCR 引物订购 CSV。

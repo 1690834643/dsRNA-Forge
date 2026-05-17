@@ -196,6 +196,12 @@ class DesignTask:
                 f"Use a shorter target/region, narrow the length range, or raise max_raw_candidates."
             )
 
+    def _target_exclude_ids(self, transcriptome: TranscriptomeIndex, target_seq_id: str) -> set:
+        """Return sequence IDs that represent the intended target, not off-targets."""
+        excluded = {target_seq_id}
+        excluded.update(getattr(transcriptome, "intended_target_ids", set()) or set())
+        return excluded
+
     def _run_sirna_mode(
         self,
         task_id: int,
@@ -225,6 +231,7 @@ class DesignTask:
         report("Building or reusing off-target risk index...", 12)
         screener = OffTargetScreener(transcriptome)
         screener.prepare_index()
+        exclude_ids = self._target_exclude_ids(transcriptome, target_seq_id)
         results = []
 
         for i, cand in enumerate(candidates):
@@ -236,7 +243,7 @@ class DesignTask:
 
             # 脱靶筛查
             off_target = screener.screen_sequence(
-                seq, exclude_ids={target_seq_id}, **config.off_target_levels
+                seq, exclude_ids=exclude_ids, **config.off_target_levels
             )
 
             # 热力学（简化版：仅 on-target RNAduplex）
@@ -321,6 +328,7 @@ class DesignTask:
         report("Building or reusing off-target risk index...", 12)
         screener = OffTargetScreener(transcriptome)
         screener.prepare_index()
+        exclude_ids = self._target_exclude_ids(transcriptome, target_seq_id)
         results = []
 
         for i, cand in enumerate(candidates):
@@ -339,7 +347,7 @@ class DesignTask:
             # 脱靶筛查（对 pool 中的产物进行）；seed 开关只控制 seed 层级，
             # 不能关闭 16/20/27bp 连续匹配层级。
             off_target = screener.screen_pool(
-                products, exclude_ids={target_seq_id}, **config.off_target_levels
+                products, exclude_ids=exclude_ids, **config.off_target_levels
             )
 
             result_record = {
@@ -401,6 +409,7 @@ class DesignTask:
         report("Building or reusing off-target risk index...", 8)
         screener = OffTargetScreener(transcriptome)
         screener.prepare_index()
+        exclude_ids = self._target_exclude_ids(transcriptome, target_seq_id)
         results = []
 
         for i, cand in enumerate(candidates):
@@ -418,7 +427,7 @@ class DesignTask:
 
             # Pool 脱靶筛查
             pool_offtarget = screener.screen_pool(
-                products, exclude_ids={target_seq_id}, **config.off_target_levels
+                products, exclude_ids=exclude_ids, **config.off_target_levels
             )
 
             # 热力学（简化：仅对 pool 中 top 产物计算 on-target）
@@ -477,6 +486,7 @@ class DesignTask:
                 cand,
                 transcriptome.sequences,
                 exclude_target_id=target_seq_id,
+                exclude_target_ids=self._target_exclude_ids(transcriptome, target_seq_id),
             )
             cloning = design_sgrna_cloning_oligos(cand["spacer_dna"])
             genotyping = design_genotyping_primers(target_seq, cand["cut_site"])
@@ -632,7 +642,7 @@ class DesignTask:
             for r in results:
                 off_target = r.get("off_target") or {}
                 top_targets = "; ".join(
-                    target.get("target_id", "")
+                    f"{target.get('target_id', '')}:{target.get('risk_score', '')}"
                     for target in off_target.get("top_targets", [])[:5]
                 )
                 cursor = conn.execute(
@@ -642,10 +652,10 @@ class DesignTask:
                         consensus_score, passed_filters, risk_level, risk_score,
                         top_risk_targets, validation_direction, recommendation_score,
                         cluster_id, cluster_size, alternative_count, cluster_span,
-                        explanation_json, validation_hits_json, primers_json, rnaup_json,
+                        off_target_json, explanation_json, validation_hits_json, primers_json, rnaup_json,
                         sgrna_json, region_map
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         task_id,
@@ -664,6 +674,7 @@ class DesignTask:
                         r.get("cluster_size", 1),
                         r.get("alternative_count", 0),
                         r.get("cluster_span", r.get("position", "")),
+                        json.dumps(off_target, ensure_ascii=False),
                         json.dumps(r.get("explanation", {}), ensure_ascii=False),
                         json.dumps(r.get("validation_hits", []), ensure_ascii=False),
                         json.dumps(r.get("primers", {}), ensure_ascii=False),

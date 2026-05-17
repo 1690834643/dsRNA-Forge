@@ -61,6 +61,7 @@
 - `Export Primers` 生成 T7 引物、sgRNA 克隆寡核苷酸和分型 PCR 引物订购 CSV。
 - Long dsRNA 结果会自动生成普通 PCR primer 和 T7 promoter primer；订购前仍建议复核扩增唯一性。
 - sgRNA 结果会显示 SpCas9 20nt spacer、NGG PAM、strand、cut site、Top off-target、BbsI 兼容克隆 oligo 和切点附近 genotyping PCR primer；高风险位点建议做靶向扩增测序/ICE/TIDE/Sanger 复核。
+- sgRNA off-target 只覆盖当前加载的参考/背景 FASTA；如果只加载转录组，不覆盖 intron/intergenic 区域。做 Cas9 基因组级脱靶筛查时，请加载 genome FASTA 作为参考或额外背景。
 - `Save Project` / `Open Project` 可保存或恢复 `.dsforge_project` 项目文件。
 
 ## 常见问题

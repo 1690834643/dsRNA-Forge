@@ -203,6 +203,8 @@ def _risk_from_hits(hits: List[Dict], max_mismatches: int = 5) -> Dict:
         "nag_pam_hits": sum(1 for h in hits if h.get("pam", "")[1:2] == "A"),
         "alternative_pam_hits": sum(1 for h in hits if h.get("pam", "")[1:2] == "A"),
         "max_mismatches_checked": max_mismatches,
+        "reference_scope": "current_reference_sequences",
+        "reference_scope_note": "sgRNA off-target scan covers only loaded transcriptome/reference/background FASTA sequences; use genome FASTA for genome-scale Cas9 off-target screening.",
     }
     summary.update({
         "perfect_hits": summary["mismatch_counts"]["0M"],
@@ -292,6 +294,7 @@ def score_sgrna_offtargets(
     candidate: Dict,
     reference_sequences: Dict[str, str],
     exclude_target_id: Optional[str] = None,
+    exclude_target_ids: Optional[Iterable[str]] = None,
     max_mismatches: int = 5,
 ) -> Dict:
     """Search SpCas9 NRG-adjacent off-targets with <= max_mismatches mismatches."""
@@ -308,7 +311,12 @@ def score_sgrna_offtargets(
         int(candidate.get("pam_end", candidate.get("position_end", intended_locus_start)) or intended_locus_start),
     )
     hits = []
+    fully_excluded_ids = set(exclude_target_ids or set())
+    if exclude_target_id in fully_excluded_ids:
+        fully_excluded_ids.remove(exclude_target_id)
     for seq_id, raw_seq in reference_sequences.items():
+        if seq_id in fully_excluded_ids:
+            continue
         seq = to_dna(raw_seq)
         for possible in _scan_spcas9_sites(seq, pam="NRG"):
             possible_locus_start = min(possible["position_start"], possible["pam_start"])

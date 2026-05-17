@@ -36,6 +36,7 @@ def _score_sirna_batch(args: dict):
     target_seq_id = args["target_seq_id"]
     enabled_rules = args["enabled_rules"]
     off_target_config = args["off_target_config"]
+    exclude_ids = set(args.get("exclude_ids") or {target_seq_id})
     transcriptome_seqs = args.get("transcriptome_seqs")
 
     if transcriptome_seqs is not None:
@@ -53,7 +54,7 @@ def _score_sirna_batch(args: dict):
         if risk_index is not None:
             off_target = risk_index.assess_sequence(
                 seq,
-                exclude_ids={target_seq_id},
+                exclude_ids=exclude_ids,
                 **off_target_config,
             )
 
@@ -77,6 +78,7 @@ def _score_long_dsRNA_batch(args: dict):
     enabled_rules = args["enabled_rules"]
     off_target_config = args["off_target_config"]
     target_seq_id = args["target_seq_id"]
+    exclude_ids = set(args.get("exclude_ids") or {target_seq_id})
     transcriptome_seqs = args.get("transcriptome_seqs")
     risk_index_override = args.get("risk_index")
 
@@ -96,7 +98,7 @@ def _score_long_dsRNA_batch(args: dict):
         if risk_index is not None:
             off_target = risk_index.assess_pool(
                 products,
-                exclude_ids={target_seq_id},
+                exclude_ids=exclude_ids,
                 **off_target_config,
             )
 
@@ -155,12 +157,14 @@ class ParallelDesignTask(DesignTask):
         off_target_config = config.off_target_levels or {}
         report("Building or reusing off-target risk index...", 12)
         risk_index = OffTargetRiskIndex.from_transcriptome(transcriptome) if transcriptome else None
+        exclude_ids = self._target_exclude_ids(transcriptome, target_seq_id)
 
         args = [
             {
                 "batch": batch,
                 "target_seq": target_seq,
                 "target_seq_id": target_seq_id,
+                "exclude_ids": list(exclude_ids),
                 "enabled_rules": config.enabled_rules,
                 "off_target_config": off_target_config,
             }
@@ -235,12 +239,14 @@ class ParallelDesignTask(DesignTask):
         off_target_config = config.off_target_levels or {}
         report("Building or reusing off-target risk index...", 8)
         risk_index = OffTargetRiskIndex.from_transcriptome(transcriptome) if transcriptome else None
+        exclude_ids = self._target_exclude_ids(transcriptome, target_seq_id)
         args = [
             {
                 "batch": batch,
                 "enabled_rules": config.enabled_rules,
                 "off_target_config": off_target_config,
                 "target_seq_id": target_seq_id,
+                "exclude_ids": list(exclude_ids),
             }
             for batch in batches
         ]

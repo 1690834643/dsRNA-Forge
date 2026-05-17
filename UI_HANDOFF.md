@@ -11,7 +11,7 @@
 - `dsforge/gui/workers.py`: GUI background worker and cancellation.
 
 ## Current Main Layout
-- Window title: `dsRNA-Forge v0.1.0`
+- Window title: `dsRNA-Forge v0.1.1`
 - Minimum size: `1400 x 900`
 - Left vertical splitter:
   - `1. Load transcriptome and choose target`
@@ -139,6 +139,8 @@
   - `nrg_pam_hits`: all NRG off-target hits counted in the sgRNA risk scan
   - `nag_pam_hits`: alternative NAG PAM hits within those NRG hits
   - `sgrnacas9_risk_evaluation`
+  - `reference_scope`: currently `current_reference_sequences`
+  - `reference_scope_note`: explains that sgRNA off-target scanning only covers loaded reference/background FASTA; genome-scale Cas9 checks require genome FASTA.
 - CSV field names:
   - `sgrna_ot_0M` ... `sgrna_ot_5M`
   - `sgrna_pot_0M` ... `sgrna_pot_5M`
@@ -154,6 +156,11 @@
 
 ## Minimal-Change UI Notes
 - UI code is mostly isolated under `dsforge/gui/`.
+- Phase23 behavior fixes:
+  - Custom pasted/uploaded targets carry `intended_target_ids`; matching transcriptome records are excluded from RNAi off-target scoring so the intended target is not reported as a false off-target.
+  - Long dsRNA/DsiRNA pool off-target payloads now include pool-level `matches`, so validation report fragments use the product match position instead of fallback position 0.
+  - Historical results now reload `off_target_json`; UI/export code should prefer `result["off_target"]` when present.
+  - RNAduplex seed thermodynamic hits can raise RNAi risk level and recommendation penalty.
 - Keep signal names stable when possible:
   - `transcriptome_loaded`
   - `transcriptome_cleared`

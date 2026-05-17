@@ -137,7 +137,8 @@ class DatabaseManager:
                    top_risk_targets: str = "", validation_direction: str = "",
                    recommendation_score: float = 0, cluster_id: int = 0,
                    cluster_size: int = 1, alternative_count: int = 0,
-                   cluster_span: str = "", explanation_json: str = "{}",
+                   cluster_span: str = "", off_target_json: str = "{}",
+                   explanation_json: str = "{}",
                    validation_hits_json: str = "[]", primers_json: str = "{}",
                    rnaup_json: str = "{}", sgrna_json: str = "{}",
                    region_map: str = "") -> int:
@@ -150,10 +151,10 @@ class DatabaseManager:
                     consensus_score, passed_filters, risk_level, risk_score,
                     top_risk_targets, validation_direction, recommendation_score,
                     cluster_id, cluster_size, alternative_count, cluster_span,
-                    explanation_json, validation_hits_json, primers_json, rnaup_json,
+                    off_target_json, explanation_json, validation_hits_json, primers_json, rnaup_json,
                     sgrna_json, region_map
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     task_id,
@@ -172,6 +173,7 @@ class DatabaseManager:
                     cluster_size,
                     alternative_count,
                     cluster_span,
+                    off_target_json,
                     explanation_json,
                     validation_hits_json,
                     primers_json,
@@ -194,6 +196,7 @@ class DatabaseManager:
             for row in rows:
                 item = dict(row)
                 for column, fallback in [
+                    ("off_target_json", {}),
                     ("explanation_json", {}),
                     ("validation_hits_json", []),
                     ("primers_json", {}),
@@ -204,7 +207,9 @@ class DatabaseManager:
                         parsed = json.loads(item.get(column) or json.dumps(fallback))
                     except (json.JSONDecodeError, TypeError):
                         parsed = fallback
-                    if column == "explanation_json":
+                    if column == "off_target_json":
+                        item["off_target"] = parsed
+                    elif column == "explanation_json":
                         item["explanation"] = parsed
                     elif column == "validation_hits_json":
                         item["validation_hits"] = parsed
@@ -217,6 +222,27 @@ class DatabaseManager:
                 item["sequence"] = item.get("candidate_seq", "")
                 item["position"] = f"{item.get('position_start', '')}-{item.get('position_end', '')}"
                 item["passed"] = bool(item.get("passed_filters", False))
+                if not item.get("off_target"):
+                    top_targets = []
+                    for raw_target in str(item.get("top_risk_targets", "") or "").split(";"):
+                        raw_target = raw_target.strip()
+                        if not raw_target:
+                            continue
+                        if ":" in raw_target:
+                            target_id, raw_score = raw_target.rsplit(":", 1)
+                            try:
+                                risk_score = float(raw_score)
+                            except ValueError:
+                                risk_score = ""
+                        else:
+                            target_id, risk_score = raw_target, ""
+                        top_targets.append({"target_id": target_id.strip(), "risk_score": risk_score, "reasons": []})
+                    item["off_target"] = {
+                        "risk_level": item.get("risk_level", "low"),
+                        "risk_score": item.get("risk_score", 0),
+                        "top_targets": top_targets,
+                        "validation_direction": item.get("validation_direction", ""),
+                    }
                 results.append(item)
             return results
 

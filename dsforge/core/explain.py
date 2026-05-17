@@ -80,6 +80,11 @@ def explain_result(result: Dict, mode: str = "") -> Dict:
         method_notes.append("RNAduplex/RNAcofold thermodynamic screening was used.")
     else:
         method_notes.append("Thermodynamic refinement was not available for this candidate.")
+    if mode == "sgRNA":
+        method_notes.append(
+            "sgRNA off-target scan is limited to currently loaded reference/background sequences; "
+            "load genome FASTA as an extra background for genome-scale Cas9 off-target screening."
+        )
 
     if passed:
         decision = "优先候选" if off_target.get("risk_level", "low") == "low" else "可验证候选"
@@ -94,6 +99,7 @@ def explain_result(result: Dict, mode: str = "") -> Dict:
         validation_notes.append("长 dsRNA 的 Dicer pool 为简化模拟；建议先确认扩增片段唯一性、T7 体外转录产物长度和 knockdown 效率。")
     if mode == "sgRNA":
         validation_notes.append("sgRNA 建议对 Top off-target 位点做 PCR 扩增测序，并用 ICE/TIDE 或 Sanger 分析确认编辑。")
+        validation_notes.append("如果当前只加载了转录组，Cas9 脱靶报告不覆盖 intron/intergenic 区域；需要基因组 FASTA 复核。")
 
     return {
         "decision": decision,

@@ -135,6 +135,8 @@ class OffTargetScreener:
                 # ViennaRNA 不可用或出错，降级为纯序列比对
                 thermo_results["error"] = str(e)
 
+        risk = self._apply_thermo_seed_risk(risk, thermo_results, seed_dg_threshold)
+
         return {
             "passed": risk["passed"],
             "risk_level": risk["risk_level"],
@@ -146,6 +148,67 @@ class OffTargetScreener:
             "risk_reasons": risk["risk_reasons"],
             "validation_direction": risk["validation_direction"],
         }
+
+    def _apply_thermo_seed_risk(self, risk: Dict, thermo_results: Dict, seed_dg_threshold: float) -> Dict:
+        """Raise sequence-risk ranking when RNAduplex finds strong seed binding."""
+        seed_hits = thermo_results.get("seed_hits") or []
+        risk.setdefault("summary", {})["thermo_seed_hits"] = len(seed_hits)
+        if not seed_hits:
+            return risk
+
+        top_by_id = {
+            target.get("target_id"): dict(target)
+            for target in risk.get("top_targets", [])
+            if target.get("target_id")
+        }
+        best_hits = {}
+        for hit in seed_hits:
+            target_id = hit.get("target_id")
+            if not target_id:
+                continue
+            current = best_hits.get(target_id)
+            if current is None or hit.get("dg", 0) < current.get("dg", 0):
+                best_hits[target_id] = hit
+
+        for target_id, hit in best_hits.items():
+            dg = float(hit.get("dg", 0) or 0)
+            score = min(90, round(45 + max(0.0, seed_dg_threshold - dg) * 8 + min(15, len(seed_hits) * 2), 2))
+            target = top_by_id.setdefault(target_id, {
+                "target_id": target_id,
+                "risk_score": 0,
+                "reasons": [],
+                "first_position": hit.get("position"),
+                "position": hit.get("position"),
+            })
+            target["risk_score"] = max(float(target.get("risk_score", 0) or 0), score)
+            reasons = set(target.get("reasons", []) or [])
+            reasons.add(f"thermodynamic seed ΔG {dg:.2f} kcal/mol")
+            target["reasons"] = sorted(reasons)
+            if target.get("first_position") is None:
+                target["first_position"] = hit.get("position")
+            if target.get("position") is None:
+                target["position"] = hit.get("position")
+            risk.setdefault("matches", []).append({
+                "target_id": target_id,
+                "match_type": "seed_7nt_thermo",
+                "length": len(hit.get("seed", "")),
+                "position": hit.get("position", 0),
+            })
+
+        top_targets = sorted(top_by_id.values(), key=lambda item: item.get("risk_score", 0), reverse=True)[:5]
+        risk["top_targets"] = top_targets
+        risk_score = max(float(risk.get("risk_score", 0) or 0), float(top_targets[0]["risk_score"] if top_targets else 0))
+        risk["risk_score"] = risk_score
+        if risk_score >= 80:
+            risk["risk_level"] = "high"
+            risk["passed"] = False
+            risk["validation_direction"] = "存在强热力学 seed 结合脱靶；优先避开该候选或验证 Top 风险转录本。"
+        elif risk_score >= 35 and risk.get("risk_level") == "low":
+            risk["risk_level"] = "medium"
+            risk["passed"] = True
+            risk["validation_direction"] = "检测到热力学 seed 结合风险；建议验证 Top 风险转录本。"
+        risk["risk_reasons"] = top_targets[0]["reasons"] if top_targets else []
+        return risk
 
     def _seed_site_candidates(self, seed: str, excluded: set) -> List[Tuple[str, int, str, int]]:
         """Return indexed seed and 1-mismatch seed sites in deterministic risk order."""

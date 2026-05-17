@@ -89,6 +89,7 @@ CREATE TABLE results (
     cluster_size INTEGER DEFAULT 1,
     alternative_count INTEGER DEFAULT 0,
     cluster_span TEXT DEFAULT '',
+    off_target_json TEXT DEFAULT '{}',
     explanation_json TEXT DEFAULT '{}',
     validation_hits_json TEXT DEFAULT '[]',
     primers_json TEXT DEFAULT '{}',
@@ -117,6 +118,7 @@ RESULTS_COLUMNS = [
     "cluster_size",
     "alternative_count",
     "cluster_span",
+    "off_target_json",
     "explanation_json",
     "validation_hits_json",
     "primers_json",
@@ -220,6 +222,7 @@ def init_database(conn):
     _ensure_column(conn, "results", "cluster_size", "INTEGER DEFAULT 1")
     _ensure_column(conn, "results", "alternative_count", "INTEGER DEFAULT 0")
     _ensure_column(conn, "results", "cluster_span", "TEXT DEFAULT ''")
+    _ensure_column(conn, "results", "off_target_json", "TEXT DEFAULT '{}'")
     _ensure_column(conn, "results", "explanation_json", "TEXT DEFAULT '{}'")
     _ensure_column(conn, "results", "validation_hits_json", "TEXT DEFAULT '[]'")
     _ensure_column(conn, "results", "primers_json", "TEXT DEFAULT '{}'")

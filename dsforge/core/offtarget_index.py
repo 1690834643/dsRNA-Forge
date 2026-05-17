@@ -140,6 +140,7 @@ class OffTargetRiskIndex:
                 "risk_score": target["risk_score"],
                 "reasons": sorted(target["reasons"]),
                 "first_position": min(target["positions"]) if target["positions"] else None,
+                "position": min(target["positions"]) if target["positions"] else None,
             })
         top_targets.sort(key=lambda item: item["risk_score"], reverse=True)
         top_targets = top_targets[:max_targets]
@@ -181,6 +182,7 @@ class OffTargetRiskIndex:
         high_risk = 0
         total_matches = 0
         target_scores: Dict[str, Dict] = {}
+        matches = []
 
         for product in products:
             result = self.assess_sequence(
@@ -194,6 +196,12 @@ class OffTargetRiskIndex:
             if result["risk_level"] == "high":
                 high_risk += 1
             total_matches += len(result["matches"])
+            for match in result["matches"]:
+                matches.append({
+                    **match,
+                    "product_sequence": product.get("sequence", ""),
+                    "product_position": product.get("position"),
+                })
             for target in result["top_targets"]:
                 current = target_scores.get(target["target_id"])
                 if current is None or target["risk_score"] > current["risk_score"]:
@@ -222,6 +230,7 @@ class OffTargetRiskIndex:
             "passed": pool_risk != "high",
             "high_risk_products": high_risk,
             "total_matches": total_matches,
+            "matches": matches,
             "product_screening": product_results,
             "top_targets": top_targets,
             "risk_reasons": top_targets[0]["reasons"] if top_targets else [],

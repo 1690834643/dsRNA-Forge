@@ -120,12 +120,21 @@ def clone_with_custom_sequence(
     safe_id = make_safe_sequence_id(seq_id, fallback_id)
     if safe_id in cloned.sequences:
         safe_id = make_safe_sequence_id(f"{safe_id}_custom", fallback_id)
-    cloned.sequences[safe_id] = normalize_sequence(sequence)
+    normalized = normalize_sequence(sequence)
+    cloned.sequences[safe_id] = normalized
+    intended_ids = set(getattr(index, "intended_target_ids", set()) or set())
+    intended_ids.add(safe_id)
+    if len(normalized) >= 20:
+        for existing_id, existing_seq in index.sequences.items():
+            existing = normalize_sequence(existing_seq)
+            if normalized == existing or normalized in existing:
+                intended_ids.add(existing_id)
+    cloned.intended_target_ids = intended_ids
     cloned.source_file = index.source_file
     digest = hashlib.sha256()
     digest.update(str(index.source_hash or "no_source_hash").encode())
     digest.update(safe_id.encode())
-    digest.update(cloned.sequences[safe_id].encode())
+    digest.update(normalized.encode())
     cloned.source_hash = f"{index.source_hash or 'custom'}_target_{digest.hexdigest()[:16]}"
     cloned.cache_path = index.cache_path
     cloned._compute_stats()
@@ -145,6 +154,7 @@ def merge_background_transcriptomes(
     merged.sequences = dict(primary.sequences)
     merged.source_file = primary.source_file
     merged.cache_path = primary.cache_path
+    merged.intended_target_ids = set(getattr(primary, "intended_target_ids", set()) or set())
 
     digest = hashlib.sha256()
     digest.update(str(primary.source_hash or "no_source_hash").encode())

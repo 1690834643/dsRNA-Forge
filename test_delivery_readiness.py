@@ -171,6 +171,27 @@ def test_clone_with_custom_sequence_keeps_background_and_adds_target():
     assert index.sequences == {"background": "UUUUUUUUUUUUUUUUUUUU"}
 
 
+def test_phase23_custom_target_excludes_matching_transcriptome_record():
+    seq = "AUGCAUGCAUGCAUGCAUGCAUGCAUGCAUGCAUGCAUGCAUGCAUGCAUGCAUGCAUGC"
+    index = TranscriptomeIndex()
+    index.sequences = {"geneA": seq, "unrelated": "U" * len(seq)}
+    index._compute_stats()
+
+    custom = clone_with_custom_sequence(index, "geneA", seq)
+    result = DesignTask(DatabaseManager(":memory:")).run(
+        custom,
+        "geneA_custom",
+        DesignConfig(mode="siRNA", n_cores=1, gc_min=0, gc_max=100, exclude_poly_n=10),
+    )
+
+    assert result["results"], result
+    assert all(
+        target.get("target_id") != "geneA"
+        for item in result["results"]
+        for target in (item.get("off_target") or {}).get("top_targets", [])
+    ), result["results"][:3]
+
+
 def test_transcriptome_cache_manifest_loads_saved_without_original_file(tmp_path):
     cache_dir = tmp_path / "cache"
     fasta = tmp_path / "saved_species.fa"
@@ -224,6 +245,33 @@ def test_offtarget_risk_summary_ranks_targets_and_suggests_validation():
     assert result["risk_score"] >= 80, result
     assert result["top_targets"][0]["target_id"] == "danger_gene", result
     assert "验证" in result["validation_direction"], result
+
+
+def test_phase23_thermo_seed_hits_raise_risk_level_and_targets():
+    query = "AUGCAUGCAUGCAUGCAUGCA"
+    seed = query[1:8]
+    index = TranscriptomeIndex()
+    index.sequences = {
+        "target_gene": query,
+        "seed_gene": "AAAA" + seed + "UUUU",
+    }
+    index._compute_stats()
+
+    class FakeThermo:
+        available = True
+
+        def rnaduplex(self, seq1, seq2):
+            return {"dg": -9.0, "structure": "fake"}
+
+    screener = OffTargetScreener(index)
+    screener._thermo = FakeThermo()
+    result = screener.screen_sequence(query, exclude_ids={"target_gene"}, use_vienna=True)
+
+    assert result["risk_level"] == "medium", result
+    assert result["risk_score"] >= 45, result
+    assert result["summary"]["thermo_seed_hits"] == 1, result
+    assert any("thermodynamic" in reason for reason in result["risk_reasons"]), result
+    assert result["top_targets"][0]["target_id"] == "seed_gene", result
 
 
 def test_phase14_offtarget_rule_switches_are_honored():
@@ -493,6 +541,26 @@ def test_phase19_dsirna_keeps_continuous_offtarget_when_seed_disabled():
         for item in risky
         for target in (item.get("off_target") or {}).get("top_targets", [])
     ), result["results"]
+
+
+def test_phase23_pool_validation_hits_use_product_match_position():
+    product_seq = "AUGCAUGCAUGCAUGCAUGCA"
+    index = TranscriptomeIndex()
+    index.sequences = {
+        "target_gene": "A" * 80,
+        "risk_gene": "U" * 10 + product_seq + "C" * 10,
+    }
+    index._compute_stats()
+
+    risk = OffTargetRiskIndex.from_sequences(index.sequences).assess_pool(
+        [{"sequence": product_seq}],
+        exclude_ids={"target_gene"},
+    )
+    hits = build_validation_hits({"sequence": product_seq, "off_target": risk}, index, max_hits=1)
+
+    assert risk["matches"], risk
+    assert hits[0]["target_position"] == 10, hits
+    assert hits[0]["target_fragment"].startswith(product_seq[:10]), hits
 
 
 def test_rnaup_records_explicit_fallback_when_cli_is_absent():
@@ -1072,6 +1140,25 @@ def test_phase13_design_task_runs_sgrna_mode():
     assert "cloning_oligos" in top["sgrna"], top
 
 
+def test_phase23_sgrna_offtarget_report_declares_reference_scope():
+    seq = "A" * 25 + "G" * 20 + "AGG" + "T" * 40
+    index = TranscriptomeIndex()
+    index.sequences = {"target_gene": seq, "background": "C" * 100}
+    index._compute_stats()
+
+    result = DesignTask(DatabaseManager(":memory:")).run(
+        index,
+        "target_gene",
+        DesignConfig(mode="sgRNA", n_cores=1),
+    )
+    top = result["results"][0]
+    summary = top["off_target"]["summary"]
+    explanation_text = "\n".join(top["explanation"]["method_notes"] + top["explanation"]["validation_notes"])
+
+    assert summary["reference_scope"] == "current_reference_sequences", summary
+    assert "genome FASTA" in explanation_text, explanation_text
+
+
 def test_phase14_history_reload_preserves_rnaup_method():
     db = DatabaseManager(":memory:")
     task_id = db.create_task(
@@ -1095,6 +1182,49 @@ def test_phase14_history_reload_preserves_rnaup_method():
 
     assert loaded["rnaup"]["details"]["method"] == "RNAup-cli", loaded
     assert loaded["rnaup"]["dg"] == -8.1, loaded
+
+
+def test_phase23_history_reload_preserves_full_offtarget_payload(tmp_path):
+    db = DatabaseManager(str(tmp_path / "history.db"))
+    result = {
+        "rank": 1,
+        "sequence": "AUGCAUGCAUGCAUGCAUGCA",
+        "position": "0-21",
+        "position_start": 0,
+        "position_end": 21,
+        "consensus_score": 80,
+        "recommendation_score": 30,
+        "passed": True,
+        "off_target": {
+            "risk_level": "high",
+            "risk_score": 95,
+            "top_targets": [
+                {"target_id": "danger_gene", "risk_score": 95, "reasons": ["20bp continuous match"]}
+            ],
+            "validation_direction": "validate danger_gene",
+        },
+        "validation_hits": [
+            {
+                "target_id": "danger_gene",
+                "risk_score": 95,
+                "reasons": ["20bp continuous match"],
+                "match_type": "20bp_consecutive",
+            }
+        ],
+    }
+
+    task_id = db.create_task("siRNA", "target_gene", result["sequence"], {})
+    DesignTask(db)._save_results(task_id, [result], DesignConfig(mode="siRNA"))
+    loaded = db.get_results(task_id)[0]
+
+    assert loaded["off_target"]["top_targets"][0]["risk_score"] == 95, loaded
+    assert loaded["off_target"]["top_targets"][0]["reasons"] == ["20bp continuous match"], loaded
+
+    csv_path = tmp_path / "history.csv"
+    ResultExporter().export_csv([loaded], str(csv_path))
+    text = csv_path.read_text(encoding="utf-8")
+    assert "danger_gene:95" in text
+    assert "20bp continuous match" in text
 
 
 def test_phase16_database_delete_task_cascades_child_rows(tmp_path):
@@ -1241,7 +1371,9 @@ if __name__ == "__main__":
     test_no_result_diagnosis_explains_short_target()
     test_phase15_sgrna_no_result_diagnosis_explains_missing_spcas9_pam()
     test_clone_with_custom_sequence_keeps_background_and_adds_target()
+    test_phase23_custom_target_excludes_matching_transcriptome_record()
     test_offtarget_risk_summary_ranks_targets_and_suggests_validation()
+    test_phase23_thermo_seed_hits_raise_risk_level_and_targets()
     test_phase14_offtarget_rule_switches_are_honored()
     test_phase14_parallel_worker_honors_offtarget_config()
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -1252,6 +1384,7 @@ if __name__ == "__main__":
     test_parallel_progress_keeps_room_for_ranking_and_saving()
     test_phase18_parallel_task_persists_full_design_config()
     test_phase19_dsirna_keeps_continuous_offtarget_when_seed_disabled()
+    test_phase23_pool_validation_hits_use_product_match_position()
     test_rnaup_records_explicit_fallback_when_cli_is_absent()
     test_redundancy_clusters_one_bp_sliding_neighbors()
     test_design_summary_reports_raw_and_nonredundant_counts()
@@ -1279,7 +1412,10 @@ if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as tmpdir:
         test_phase15_sgrna_export_and_history_preserve_pam_strand_cut_site(Path(tmpdir))
     test_phase13_design_task_runs_sgrna_mode()
+    test_phase23_sgrna_offtarget_report_declares_reference_scope()
     test_phase14_history_reload_preserves_rnaup_method()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        test_phase23_history_reload_preserves_full_offtarget_payload(Path(tmpdir))
     with tempfile.TemporaryDirectory() as tmpdir:
         test_phase16_database_delete_task_cascades_child_rows(Path(tmpdir))
     test_phase19_schema_upgrade_preserves_results_foreign_key_for_old_databases()

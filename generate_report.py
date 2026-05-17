@@ -721,7 +721,7 @@ def generate_html(result, output_path="report.html"):
                 </div>
                 <div class="header-meta-item">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-                    <span>版本: v0.1.0</span>
+                    <span>版本: v0.1.1</span>
                 </div>
                 <div class="header-meta-item">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>
@@ -874,7 +874,7 @@ def generate_html(result, output_path="report.html"):
     <footer class="report-footer">
         <div class="footer-brand">
             <span>🧬</span>
-            <span>dsRNA-Forge v0.1.0</span>
+            <span>dsRNA-Forge v0.1.1</span>
         </div>
         <div class="footer-links">
             <a href="https://github.com/dsRNA-Forge">GitHub</a>

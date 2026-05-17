@@ -122,7 +122,7 @@ def main():
     parser.add_argument(
         "--version",
         action="version",
-        version="dsRNA-Forge 0.1.0",
+        version="dsRNA-Forge 0.1.1",
     )
     parser.add_argument(
         "--check-runtime",
@@ -144,7 +144,7 @@ def main():
 
     app = QApplication(sys.argv)
     app.setApplicationName("dsRNA-Forge")
-    app.setApplicationVersion("0.1.0")
+    app.setApplicationVersion("0.1.1")
 
     window = MainWindow()
     window.show()
