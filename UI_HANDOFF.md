@@ -11,7 +11,7 @@
 - `dsforge/gui/workers.py`: GUI background worker and cancellation.
 
 ## Current Main Layout
-- Window title: `dsRNA-Forge v0.1.1`
+- Window title: `dsRNA-Forge v0.1.2`
 - Minimum size: `1400 x 900`
 - Left vertical splitter:
   - `1. Load transcriptome and choose target`
@@ -131,6 +131,11 @@
 
 ## Phase20 sgRNA Fields
 - Design PAM remains SpCas9 canonical `NGG`; off-target search now checks SpCas9 `NRG` sites, including `NAG`.
+- Phase24 behavior:
+  - sgRNA design calls `prepare_sgrna_design_sequence()` first. Prefer CDS input; mRNA/cDNA input is converted to the longest ATG-to-stop inferred CDS when possible.
+  - `build_sgrna_reference_sites()` scans reference/background sequences once per run, then all candidates use the shared `score_sgrna_offtargets_from_sites()` path.
+  - `DesignTask._get_sgrna_reference_sites()` reuses the same in-memory site index for the same transcriptome object and exclusion set, so changing target genes in one session avoids rebuilding the reference index.
+  - Results prioritize front-CDS candidates via `cds_priority_bonus` before off-target ranking.
 - Off-target summary keys under `result["off_target"]["summary"]`:
   - `mismatch_counts`: `0M`, `1M`, `2M`, `3M`, `4M`, `5M`
   - `pot_mismatch_counts`: same buckets, only hits with 12 nt PAM-proximal seed match
@@ -142,6 +147,10 @@
   - `reference_scope`: currently `current_reference_sequences`
   - `reference_scope_note`: explains that sgRNA off-target scanning only covers loaded reference/background FASTA; genome-scale Cas9 checks require genome FASTA.
 - CSV field names:
+  - `sgrna_source_position_start`, `sgrna_source_position_end`, `sgrna_source_cut_site`
+  - `sgrna_cds_region`, `sgrna_cds_position_percent`, `sgrna_cds_priority_bonus`
+  - `sgrna_design_input_type`, `sgrna_cds_source_start`, `sgrna_cds_source_end`
+  - `sgrna_input_advice`
   - `sgrna_ot_0M` ... `sgrna_ot_5M`
   - `sgrna_pot_0M` ... `sgrna_pot_5M`
   - `sgrna_total_ot`

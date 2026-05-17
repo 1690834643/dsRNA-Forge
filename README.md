@@ -17,7 +17,9 @@
 - **长 dsRNA 专用设计逻辑**：预测 Dicer 切割位点，评估 siRNA pool 整体质量
 - **热力学脱靶评估**：内嵌 ViennaRNA；Windows 包自检要求真实 `RNAup-cli` 可用，Top 候选会记录 RNAup 方法
 - **sgRNA 设计模块**：支持 SpCas9 20nt spacer + NGG PAM，扫描正负链，输出 PAM、strand、cut site、on-target score
+- **CDS-aware sgRNA 输入**：建议提交 CDS；如果选择 mRNA/cDNA，会尝试用最长 ATG-to-stop ORF 推断 CDS，并优先推荐前段 CDS 候选
 - **sgRNA 脱靶排序**：对当前加载参考序列中的 NRG PAM-adjacent 近似位点做 mismatch 风险排序，给出 Top off-target 和扩增测序验证方向
+- **sgRNA 快速索引**：每次设计只扫描一次参考/背景 FASTA 中的 Cas9 NRG 位点，再批量给候选打分；同一软件会话、同一转录组可复用该索引
 - **sgRNA 实验寡核苷酸**：导出 pX330/lentiCRISPR 常见 BbsI 克隆寡核苷酸，以及切点附近基因分型 PCR 引物
 - **无结果诊断**：当候选为 0 或全部被过滤时，会提示可能原因和下一步调整建议
 - **脱靶风险排序**：显示风险等级、风险分、Top 风险转录本和验证方向，导出文件同步包含这些列
@@ -184,9 +186,11 @@ Windows 发布包随 exe 打入官方 ViennaRNA CLI，运行时自检要求 `RNA
 ## sgRNA 模块说明
 
 - 默认标准：SpCas9，20nt spacer，NGG PAM。
+- 输入建议：优先提交 CDS FASTA；如果输入 mRNA/cDNA，软件会尝试推断最长 ATG-to-stop CDS，结果同时报告 CDS 内坐标和原始输入坐标。
 - 扫描范围：目标序列正链 NGG 和反链 CCN 都会扫描。
-- 排序依据：on-target heuristic、GC 区间、U6 终止信号、PAM-proximal seed 区域和当前参考范围内的 off-target 风险。
+- 排序依据：on-target heuristic、GC 区间、U6 终止信号、PAM-proximal seed 区域、前段 CDS 优先级和当前参考范围内的 off-target 风险。
 - 脱靶输出：Top off-target、mismatch 数、PAM、strand、risk score、参考范围说明和验证方向。
+- 性能：参考/背景序列的 SpCas9 NRG 位点每轮只索引一次，多个 sgRNA 候选共享该索引；同一软件会话里换不同 target 可复用同一转录组索引。
 - 实验输出：BbsI 兼容 forward/reverse cloning oligo，以及切点附近 genotyping PCR primer。
 - 注意：sgRNA off-target 只覆盖当前加载的参考/背景 FASTA；如果只加载转录组，不覆盖 intron/intergenic 区域。基因组级 Cas9 脱靶筛查需要加载 genome FASTA 作为参考或额外背景。当前离线模型是可解释 heuristic，不宣称等同 CRISPOR/CRISPRdirect/CHOPCHOP 的完整在线数据库评分；高价值实验仍建议对 Top off-target 做靶向扩增测序。
 

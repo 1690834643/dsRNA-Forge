@@ -60,7 +60,9 @@
 - `Export Report` 生成 Excel 报告，包含推荐理由、潜在脱靶基因/转录本、风险原因、匹配片段、T7 引物和方法说明。
 - `Export Primers` 生成 T7 引物、sgRNA 克隆寡核苷酸和分型 PCR 引物订购 CSV。
 - Long dsRNA 结果会自动生成普通 PCR primer 和 T7 promoter primer；订购前仍建议复核扩增唯一性。
-- sgRNA 结果会显示 SpCas9 20nt spacer、NGG PAM、strand、cut site、Top off-target、BbsI 兼容克隆 oligo 和切点附近 genotyping PCR primer；高风险位点建议做靶向扩增测序/ICE/TIDE/Sanger 复核。
+- sgRNA 模式建议提交 CDS 序列；如果选择 mRNA/cDNA，软件会尝试推断最长 ATG-to-stop CDS，并优先推荐前段 CDS 候选。
+- sgRNA 结果会显示 SpCas9 20nt spacer、NGG PAM、strand、cut site、CDS 位置、原始输入坐标、Top off-target、BbsI 兼容克隆 oligo 和切点附近 genotyping PCR primer；高风险位点建议做靶向扩增测序/ICE/TIDE/Sanger 复核。
+- sgRNA 脱靶评分会先把参考/背景 FASTA 的 NRG PAM 位点索引一次，再批量评分所有候选；同一轮设计不会对 278 个候选重复全库扫描 278 次，同一软件会话里换不同基因可复用同一转录组索引。
 - sgRNA off-target 只覆盖当前加载的参考/背景 FASTA；如果只加载转录组，不覆盖 intron/intergenic 区域。做 Cas9 基因组级脱靶筛查时，请加载 genome FASTA 作为参考或额外背景。
 - `Save Project` / `Open Project` 可保存或恢复 `.dsforge_project` 项目文件。
 

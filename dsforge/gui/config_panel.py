@@ -45,6 +45,10 @@ class ConfigPanel(QGroupBox):
             "Long dsRNA for RNAi (200-500 bp)",
             "sgRNA for SpCas9 (20 nt + NGG PAM)",
         ])
+        self.mode_combo.setToolTip(
+            "sgRNA mode works best with CDS FASTA. If mRNA/cDNA is selected, "
+            "dsRNA-Forge attempts CDS inference and prioritizes front-CDS guides."
+        )
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         mode_layout.addWidget(self.mode_combo)
         layout.addLayout(mode_layout)

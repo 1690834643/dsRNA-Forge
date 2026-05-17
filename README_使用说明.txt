@@ -45,7 +45,9 @@ dsRNA-Forge Windows 傻瓜式使用说明
 - 软件会为 Top 候选尝试 RNAup 精筛；如果开发环境没有 RNAup CLI，会明确记录为 RNAduplex fallback，不会冒充 RNAup 精确结果。正式 Windows 包不应出现这个 fallback。
 - 默认结果是非冗余推荐：相邻 1 bp 滑窗、重叠度很高的候选会折叠成一条代表结果。
 - Cluster Size 表示这一条代表结果下面折叠了多少个相似候选；数值越大，说明附近有更多等价替代窗口。
-- sgRNA 模式按 SpCas9 20nt spacer + NGG PAM 扫描正负链，结果会显示 PAM、strand、cut site、Top off-target 和验证方向。
+- sgRNA 模式建议提交 CDS 序列；如果选择 mRNA/cDNA，软件会尝试推断最长 ATG-to-stop CDS，并优先推荐前段 CDS 候选。
+- sgRNA 模式按 SpCas9 20nt spacer + NGG PAM 扫描正负链，结果会显示 PAM、strand、cut site、CDS 位置、原始输入坐标、Top off-target 和验证方向。
+- sgRNA 脱靶评分会先把参考/背景 FASTA 的 NRG PAM 位点索引一次，再批量评分所有 sgRNA 候选，避免长时间停在 Scoring sgRNA 1/N；同一软件会话、同一转录组换基因可复用该索引。
 - sgRNA off-target 只覆盖当前加载的参考/背景 FASTA；如果只加载转录组，不覆盖 intron/intergenic 区域。做 Cas9 基因组级脱靶筛查时，请加载 genome FASTA 作为参考或额外背景。
 - sgRNA 模式会导出 BbsI 兼容克隆寡核苷酸，以及切点附近 genotyping PCR 引物；高风险 off-target 建议做靶向扩增测序/ICE/TIDE/Sanger。
 - Export Report 会生成实验验证报告，包含推荐理由、Top 脱靶验证对象、匹配片段、T7 引物、sgRNA oligo/分型引物和方法说明。

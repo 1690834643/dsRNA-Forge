@@ -11,9 +11,13 @@ from dsforge.core.offtarget_index import OffTargetRiskIndex
 from pathlib import Path
 from dsforge.core.redundancy import cluster_redundant_results
 from dsforge.core.sgrna import (
+    annotate_sgrna_cds_priority,
+    build_sgrna_reference_sites,
     design_sgrna_cloning_oligos,
+    prepare_sgrna_design_sequence,
     scan_sgrna_candidates,
     score_sgrna_offtargets,
+    score_sgrna_offtargets_from_sites,
 )
 from dsforge.core.sequence import (
     TranscriptomeIndex,
@@ -1019,6 +1023,190 @@ def test_phase20_sgrna_cloning_oligos_warn_for_vector_restriction_sites_and_cust
     assert "restriction enzyme" in oligos["notes"], oligos
 
 
+def test_phase24_sgrna_offtarget_index_matches_legacy_scorer_without_rescanning():
+    import dsforge.core.sgrna as sgrna_module
+
+    spacer = "GCTGCTGCTGCTGCTGCTGC"
+    target = "A" * 25 + spacer + "AGG" + "T" * 30 + "GCTGCTGCTGCTGCTGCTGA" + "TGG" + "A" * 25
+    near = "C" * 20 + "GCTGCTGCTGCTGCTGCTGA" + "TGG" + "C" * 20
+    reference = {
+        "target_gene": target,
+        "near_offtarget": near,
+        "background": "A" * 250,
+    }
+    candidates = scan_sgrna_candidates(target)
+    chosen = [candidate for candidate in candidates if candidate["strand"] == "+"][:2]
+    assert len(chosen) == 2, candidates
+
+    legacy = score_sgrna_offtargets(chosen[0], reference, exclude_target_id="target_gene")
+
+    original_scan = sgrna_module._scan_spcas9_sites
+    scan_calls = []
+
+    def spy_scan(sequence, pam="NGG"):
+        if pam == "NRG":
+            scan_calls.append(len(sequence))
+        return original_scan(sequence, pam=pam)
+
+    sgrna_module._scan_spcas9_sites = spy_scan
+    try:
+        sites = build_sgrna_reference_sites(reference)
+        indexed = score_sgrna_offtargets_from_sites(
+            chosen[0],
+            sites,
+            exclude_target_id="target_gene",
+        )
+        score_sgrna_offtargets_from_sites(
+            chosen[1],
+            sites,
+            exclude_target_id="target_gene",
+        )
+    finally:
+        sgrna_module._scan_spcas9_sites = original_scan
+
+    assert len(scan_calls) == len(reference), scan_calls
+    assert indexed["summary"]["mismatch_counts"] == legacy["summary"]["mismatch_counts"], indexed
+    assert indexed["top_targets"][0]["target_id"] == legacy["top_targets"][0]["target_id"], indexed
+    assert indexed["top_targets"][0]["mismatches"] == legacy["top_targets"][0]["mismatches"], indexed
+
+
+def test_phase24_sgrna_offtarget_index_prunes_comparisons_without_missing_five_mismatch_hit():
+    import dsforge.core.sgrna as sgrna_module
+
+    spacer = "GCAGCAGCAGCAGCAGCAGC"
+    five_mm = "TCAGAAGCCGCATCAGAAGC"
+    target = "A" * 25 + spacer + "AGG" + "A" * 25
+    decoy_site = "TATATATATATATATATATA" + "AGG"
+    reference = {
+        "target_gene": target,
+        "five_mm_hit": "A" * 20 + five_mm + "AGG" + "A" * 20,
+        "decoys": ("A" * 7 + decoy_site) * 80,
+    }
+    candidate = next(c for c in scan_sgrna_candidates(target) if c["spacer_dna"] == spacer)
+    sites = build_sgrna_reference_sites(reference)
+
+    original_mismatch = sgrna_module._mismatch_positions
+    calls = []
+
+    def spy_mismatch(a, b):
+        calls.append(b)
+        return original_mismatch(a, b)
+
+    sgrna_module._mismatch_positions = spy_mismatch
+    try:
+        risk = score_sgrna_offtargets_from_sites(candidate, sites, exclude_target_id="target_gene")
+    finally:
+        sgrna_module._mismatch_positions = original_mismatch
+
+    assert any(hit["target_id"] == "five_mm_hit" and hit["mismatches"] == 5 for hit in risk["top_targets"]), risk
+    assert len(calls) < len(sites) // 2, (len(calls), len(sites))
+
+
+def test_phase24_sgrna_prepares_mrna_by_extracting_cds_and_prioritizing_front_cds():
+    utr5 = "TTTTTTTTTT"
+    cds = "ATG" + "GCA" * 8 + "AGG" + "GCA" * 40 + "AGG" + "GCA" * 10 + "TAA"
+    mrna = utr5 + cds + "AAAAAAAA"
+
+    prepared = prepare_sgrna_design_sequence(mrna)
+    candidates = annotate_sgrna_cds_priority(scan_sgrna_candidates(prepared["design_sequence"]), prepared)
+
+    assert prepared["source_start"] == len(utr5), prepared
+    assert prepared["source_end"] == len(utr5) + len(cds), prepared
+    assert prepared["cds_inferred"] is True, prepared
+    assert any("CDS" in note for note in prepared["advice"]), prepared
+    assert candidates[0]["cds_region"] == "front_cds", candidates[0]
+    assert candidates[0]["cds_position_percent"] <= 35, candidates[0]
+    assert candidates[0]["source_position_start"] == len(utr5) + candidates[0]["position_start"], candidates[0]
+
+
+def test_phase24_sgrna_design_task_reports_cds_scope_and_excludes_shifted_on_target_site():
+    utr5 = "TTTTTTTTTTTT"
+    cds = "ATG" + "GCA" * 8 + "AGG" + "GCA" * 20 + "TAA"
+    spacer = cds[7:27]
+    mrna = utr5 + cds + "AAAAAAAAAA"
+    index = TranscriptomeIndex()
+    index.sequences = {"target_gene": mrna, "background": "A" * 200}
+    index._compute_stats()
+
+    result = DesignTask(DatabaseManager(":memory:")).run(
+        index,
+        "target_gene",
+        DesignConfig(mode="sgRNA", n_cores=1),
+    )
+    top = result["results"][0]
+    notes = "\n".join(top["explanation"]["efficacy_notes"] + top["explanation"]["method_notes"])
+
+    assert top["sgrna"]["spacer_dna"] == spacer, top
+    assert top["sgrna"]["source_position_start"] == len(utr5) + top["sgrna"]["position_start"], top["sgrna"]
+    assert top["off_target"]["summary"]["mismatch_counts"]["0M"] == 0, top["off_target"]
+    assert "CDS" in notes, notes
+
+
+def test_phase24_sgrna_reference_index_is_reused_for_same_transcriptome_session():
+    import dsforge.controller.design_task as design_task_module
+
+    seq1 = "A" * 25 + "G" * 20 + "AGG" + "A" * 40
+    seq2 = "A" * 25 + "CAGCAGCAGCAGCAGCAGCA" + "AGG" + "A" * 40
+    index = TranscriptomeIndex()
+    index.sequences = {
+        "gene1": seq1,
+        "gene2": seq2,
+        "background": ("A" * 7 + "TATATATATATATATATATAAGG") * 50,
+    }
+    index.source_hash = "stable_test_hash"
+    index._compute_stats()
+
+    original_builder = design_task_module.build_sgrna_reference_sites
+    calls = []
+
+    def spy_builder(*args, **kwargs):
+        calls.append(1)
+        return original_builder(*args, **kwargs)
+
+    design_task_module.build_sgrna_reference_sites = spy_builder
+    try:
+        DesignTask(DatabaseManager(":memory:")).run(index, "gene1", DesignConfig(mode="sgRNA", n_cores=1))
+        DesignTask(DatabaseManager(":memory:")).run(index, "gene2", DesignConfig(mode="sgRNA", n_cores=1))
+    finally:
+        design_task_module.build_sgrna_reference_sites = original_builder
+
+    assert len(calls) == 1, calls
+
+
+def test_phase24_sgrna_export_includes_cds_scope_fields(tmp_path):
+    csv_path = tmp_path / "sgrna_cds.csv"
+    ResultExporter().export_csv([{
+        "rank": 1,
+        "sequence": "CAGCAGCAGCAGCAGCAGCA",
+        "position": "19-39",
+        "position_start": 19,
+        "position_end": 39,
+        "consensus_score": 90,
+        "recommendation_score": 90,
+        "passed": True,
+        "sgrna": {
+            "spacer_dna": "CAGCAGCAGCAGCAGCAGCA",
+            "guide_rna": "CAGCAGCAGCAGCAGCAGCA",
+            "pam": "AGG",
+            "strand": "+",
+            "cut_site": 24,
+            "source_position_start": 19,
+            "source_position_end": 39,
+            "source_cut_site": 36,
+            "cds_region": "front_cds",
+            "cds_position_percent": 13.2,
+            "design_input_type": "mrna_inferred_cds",
+            "input_advice": ["已从输入 mRNA/cDNA 推断 CDS。"],
+        },
+        "off_target": {"risk_level": "low", "risk_score": 0, "summary": {}},
+    }], str(csv_path))
+
+    text = csv_path.read_text(encoding="utf-8")
+    assert "sgrna_cds_region" in text, text
+    assert "sgrna_source_position_start" in text, text
+    assert "mrna_inferred_cds" in text, text
+
+
 def test_phase20_sgrna_export_includes_sgrnacas9_style_ot_and_pot_counts(tmp_path):
     risk = {
         "risk_level": "medium",
@@ -1422,4 +1610,11 @@ if __name__ == "__main__":
     test_phase16_design_cancellation_marks_task_cancelled()
     test_phase16_long_dsrna_large_target_is_rejected_before_materializing_candidates()
     test_phase13_sgrna_validation_hits_use_amplicon_sequencing_action()
+    test_phase24_sgrna_offtarget_index_matches_legacy_scorer_without_rescanning()
+    test_phase24_sgrna_offtarget_index_prunes_comparisons_without_missing_five_mismatch_hit()
+    test_phase24_sgrna_prepares_mrna_by_extracting_cds_and_prioritizing_front_cds()
+    test_phase24_sgrna_design_task_reports_cds_scope_and_excludes_shifted_on_target_site()
+    test_phase24_sgrna_reference_index_is_reused_for_same_transcriptome_session()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        test_phase24_sgrna_export_includes_cds_scope_fields(Path(tmpdir))
     print("delivery-readiness tests passed")

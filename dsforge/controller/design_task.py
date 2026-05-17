@@ -16,10 +16,13 @@ from dsforge.core.offtarget import OffTargetScreener
 from dsforge.core.primers import design_t7_primers
 from dsforge.core.redundancy import cluster_redundant_results
 from dsforge.core.sgrna import (
+    annotate_sgrna_cds_priority,
+    build_sgrna_reference_sites,
     design_genotyping_primers,
     design_sgrna_cloning_oligos,
+    prepare_sgrna_design_sequence,
     scan_sgrna_candidates,
-    score_sgrna_offtargets,
+    score_sgrna_offtargets_from_sites,
 )
 from dsforge.core.thermodynamics import ThermodynamicsCalculator
 from dsforge.core.validation import build_validation_hits
@@ -201,6 +204,27 @@ class DesignTask:
         excluded = {target_seq_id}
         excluded.update(getattr(transcriptome, "intended_target_ids", set()) or set())
         return excluded
+
+    def _get_sgrna_reference_sites(self, transcriptome: TranscriptomeIndex, fully_excluded_ids: set):
+        """Build or reuse an in-memory sgRNA reference-site index for this transcriptome."""
+        total_length = sum(len(seq) for seq in transcriptome.sequences.values())
+        key = (
+            getattr(transcriptome, "source_hash", None),
+            len(transcriptome.sequences),
+            total_length,
+            tuple(sorted(fully_excluded_ids or set())),
+        )
+        cache = getattr(transcriptome, "_sgrna_reference_sites_cache", None)
+        if not isinstance(cache, dict):
+            cache = {}
+            setattr(transcriptome, "_sgrna_reference_sites_cache", cache)
+        if key not in cache:
+            cache[key] = build_sgrna_reference_sites(
+                transcriptome.sequences,
+                exclude_target_ids=fully_excluded_ids,
+            )
+            return cache[key], False
+        return cache[key], True
 
     def _run_sirna_mode(
         self,
@@ -477,27 +501,45 @@ class DesignTask:
         report: Callable,
     ) -> List[Dict]:
         """SpCas9 sgRNA mode: 20 nt spacer next to NGG PAM."""
-        report("Scanning SpCas9 NGG sgRNA candidates...", 0)
-        candidates = scan_sgrna_candidates(target_seq)
+        report("Preparing CDS-aware sgRNA input...", 0)
+        design_info = prepare_sgrna_design_sequence(target_seq)
+        design_seq = design_info["design_sequence"]
+
+        report("Scanning SpCas9 NGG sgRNA candidates...", 3)
+        candidates = annotate_sgrna_cds_priority(
+            scan_sgrna_candidates(design_seq),
+            design_info,
+        )
         report(f"Generated {len(candidates)} sgRNA candidates", 15)
+
+        exclude_ids = self._target_exclude_ids(transcriptome, target_seq_id)
+        fully_excluded_ids = set(exclude_ids)
+        fully_excluded_ids.discard(target_seq_id)
+        report("Building or reusing sgRNA off-target index...", 16)
+        reference_sites, reused_reference_index = self._get_sgrna_reference_sites(transcriptome, fully_excluded_ids)
+        if reused_reference_index:
+            report(f"Reused {len(reference_sites)} SpCas9 NRG reference sites", 25)
+        else:
+            report(f"Indexed {len(reference_sites)} SpCas9 NRG reference sites", 25)
+
         results = []
         for i, cand in enumerate(candidates):
-            off_target = score_sgrna_offtargets(
+            off_target = score_sgrna_offtargets_from_sites(
                 cand,
-                transcriptome.sequences,
+                reference_sites,
                 exclude_target_id=target_seq_id,
-                exclude_target_ids=self._target_exclude_ids(transcriptome, target_seq_id),
+                exclude_target_ids=exclude_ids,
             )
             cloning = design_sgrna_cloning_oligos(cand["spacer_dna"])
-            genotyping = design_genotyping_primers(target_seq, cand["cut_site"])
-            consensus_score = cand["on_target_score"]
+            genotyping = design_genotyping_primers(target_seq, cand.get("source_cut_site", cand["cut_site"]))
+            consensus_score = max(0.0, min(100.0, cand.get("locus_priority_score", cand["on_target_score"])))
             result_record = {
                 "task_id": task_id,
                 "rank": i + 1,
                 "sequence": cand["guide_rna"],
-                "position": f"{cand['position_start']}-{cand['position_end']}",
-                "position_start": cand["position_start"],
-                "position_end": cand["position_end"],
+                "position": f"{cand['source_position_start']}-{cand['source_position_end']}",
+                "position_start": cand["source_position_start"],
+                "position_end": cand["source_position_end"],
                 "consensus_score": consensus_score,
                 "passed": consensus_score >= 45 and off_target["passed"],
                 "off_target": off_target,
@@ -513,7 +555,7 @@ class DesignTask:
             }
             results.append(result_record)
             if candidates:
-                percent = 15 + (i + 1) / len(candidates) * 65
+                percent = 25 + (i + 1) / len(candidates) * 55
                 report(f"Scoring sgRNA {i + 1}/{len(candidates)}", percent)
 
         report("Ranking sgRNAs by activity and off-target risk...", 84)

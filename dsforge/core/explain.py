@@ -39,6 +39,14 @@ def explain_result(result: Dict, mode: str = "") -> Dict:
             f"SpCas9 guide: spacer {sg.get('spacer_dna', '')}, PAM {sg.get('pam', '')}, "
             f"strand {sg.get('strand', '')}{genomic_text}, cut site {sg.get('cut_site', '')}."
         )
+        if sg.get("cds_region"):
+            efficacy_notes.append(
+                f"CDS-aware sgRNA ranking: {sg.get('cds_region')} at {sg.get('cds_position_percent', '')}% "
+                f"of the design sequence; original input coordinates "
+                f"{sg.get('source_position_start', sg.get('position_start', ''))}-{sg.get('source_position_end', sg.get('position_end', ''))}."
+            )
+            if sg.get("source_cut_site") != "":
+                efficacy_notes.append(f"Original input cut-site coordinate: {sg.get('source_cut_site')}.")
 
     risk_notes: List[str] = [f"Off-target summary: {_risk_label(off_target)}."]
     summary = off_target.get("summary") or {}
@@ -85,6 +93,8 @@ def explain_result(result: Dict, mode: str = "") -> Dict:
             "sgRNA off-target scan is limited to currently loaded reference/background sequences; "
             "load genome FASTA as an extra background for genome-scale Cas9 off-target screening."
         )
+        sgrna_advice = ((result.get("sgrna") or {}).get("input_advice") or [])[:3]
+        method_notes.extend(str(note) for note in sgrna_advice if note)
 
     if passed:
         decision = "优先候选" if off_target.get("risk_level", "low") == "low" else "可验证候选"

@@ -26,18 +26,18 @@ def _diagnose_empty_sgrna(seq: str) -> Dict[str, List[str]]:
     if not has_plus_pam and not has_reverse_pam:
         return {
             "reasons": ["目标序列中没有可用 SpCas9 PAM：正向需要 NGG，反向在输入正链上表现为 CCN。"],
-            "suggestions": ["换一个包含 NGG/CCN 的目标区域，或上传带上下游 flanking sequence 的更长片段。"],
+            "suggestions": ["换一个包含 NGG/CCN 的 CDS 目标区域，或上传带上下游 flanking sequence 的更长片段。"],
         }
 
     if set(dna) - valid_bases:
         return {
             "reasons": ["检测到 SpCas9 PAM，但 PAM 附近的 20 nt spacer 含有 N/模糊碱基，无法生成精确 sgRNA。"],
-            "suggestions": ["使用 A/C/G/T 明确碱基的参考序列，或避开含 N 的区域。"],
+            "suggestions": ["使用 A/C/G/T 明确碱基的 CDS 参考序列，或避开含 N 的区域。"],
         }
 
     return {
         "reasons": ["检测到 SpCas9 PAM，但没有足够的 20 nt spacer 上下文可生成候选。"],
-        "suggestions": ["上传更长的目标片段，确保 NGG 前方或 CCN 后方至少有 20 nt 可用序列。"],
+        "suggestions": ["上传更长的 CDS/目标片段，确保 NGG 前方或 CCN 后方至少有 20 nt 可用序列。"],
     }
 
 

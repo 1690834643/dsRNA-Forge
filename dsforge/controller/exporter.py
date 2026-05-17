@@ -115,6 +115,9 @@ class ResultExporter:
 
     def _sgrna_fields(self, result: Dict) -> Dict:
         sgrna = result.get("sgrna") or {}
+        input_advice = sgrna.get("input_advice") or []
+        if isinstance(input_advice, list):
+            input_advice = "; ".join(str(item) for item in input_advice if item)
         return {
             "sgrna_spacer_dna": sgrna.get("spacer_dna", ""),
             "sgrna_guide_rna": sgrna.get("guide_rna", result.get("sequence", "") if sgrna else ""),
@@ -124,6 +127,16 @@ class ResultExporter:
             "sgrna_cut_site": sgrna.get("cut_site", ""),
             "sgrna_gc_percent": sgrna.get("gc_percent", ""),
             "sgrna_on_target_score": sgrna.get("on_target_score", ""),
+            "sgrna_source_position_start": sgrna.get("source_position_start", ""),
+            "sgrna_source_position_end": sgrna.get("source_position_end", ""),
+            "sgrna_source_cut_site": sgrna.get("source_cut_site", ""),
+            "sgrna_cds_region": sgrna.get("cds_region", ""),
+            "sgrna_cds_position_percent": sgrna.get("cds_position_percent", ""),
+            "sgrna_cds_priority_bonus": sgrna.get("cds_priority_bonus", ""),
+            "sgrna_design_input_type": sgrna.get("design_input_type", ""),
+            "sgrna_cds_source_start": sgrna.get("cds_source_start", ""),
+            "sgrna_cds_source_end": sgrna.get("cds_source_end", ""),
+            "sgrna_input_advice": input_advice,
         }
 
     def export_csv(self, results: List[Dict], filepath: str):
@@ -146,6 +159,16 @@ class ResultExporter:
                 "sgrna_cut_site",
                 "sgrna_gc_percent",
                 "sgrna_on_target_score",
+                "sgrna_source_position_start",
+                "sgrna_source_position_end",
+                "sgrna_source_cut_site",
+                "sgrna_cds_region",
+                "sgrna_cds_position_percent",
+                "sgrna_cds_priority_bonus",
+                "sgrna_design_input_type",
+                "sgrna_cds_source_start",
+                "sgrna_cds_source_end",
+                "sgrna_input_advice",
                 "consensus_score",
                 "recommendation_score",
                 "cluster_id",
@@ -249,6 +272,16 @@ class ResultExporter:
                     "sgRNA Cut Site": sgrna_fields["sgrna_cut_site"],
                     "sgRNA GC %": sgrna_fields["sgrna_gc_percent"],
                     "sgRNA On-target Score": sgrna_fields["sgrna_on_target_score"],
+                    "sgRNA Source Start": sgrna_fields["sgrna_source_position_start"],
+                    "sgRNA Source End": sgrna_fields["sgrna_source_position_end"],
+                    "sgRNA Source Cut Site": sgrna_fields["sgrna_source_cut_site"],
+                    "sgRNA CDS Region": sgrna_fields["sgrna_cds_region"],
+                    "sgRNA CDS Position %": sgrna_fields["sgrna_cds_position_percent"],
+                    "sgRNA CDS Priority Bonus": sgrna_fields["sgrna_cds_priority_bonus"],
+                    "sgRNA Design Input Type": sgrna_fields["sgrna_design_input_type"],
+                    "sgRNA CDS Source Start": sgrna_fields["sgrna_cds_source_start"],
+                    "sgRNA CDS Source End": sgrna_fields["sgrna_cds_source_end"],
+                    "sgRNA Input Advice": sgrna_fields["sgrna_input_advice"],
                     "Consensus Score": r.get("consensus_score", ""),
                     "Recommendation Score": risk_fields["recommendation_score"],
                     "Cluster ID": risk_fields["cluster_id"],
@@ -313,6 +346,7 @@ class ResultExporter:
         recommendations.append([
             "Rank", "Sequence", "Position", "Consensus Score", "Recommendation Score",
             "sgRNA PAM", "sgRNA Genomic PAM", "sgRNA Strand", "sgRNA Cut Site",
+            "sgRNA Source Start", "sgRNA Source End", "sgRNA CDS Region", "sgRNA CDS Position %",
             "Risk", "Risk Score", "sgRNA Total OT", "sgRNA Total POT",
             "sgRNA NRG PAM Hits", "sgRNA NAG PAM Hits", "sgRNA Risk Evaluation",
             "Top Off-target Genes", "Decision Summary", "Validation Direction", "Passed",
@@ -338,6 +372,7 @@ class ResultExporter:
         methods.append(["Ranking", "Recommendation score combines efficacy score and off-target risk penalty."])
         methods.append(["Dicer", "Long dsRNA product pools are heuristic Dicer-product simulations for relative ranking, not quantitative knockdown predictions."])
         methods.append(["Off-target", "RNAi risk uses 27bp/20bp/16bp continuous matches and 7nt seed matches; sgRNA risk uses SpCas9 NRG PAM-adjacent <=5 mismatch spacer hits, with separate 12 nt seed/POT counts."])
+        methods.append(["sgRNA input", "sgRNA design prefers CDS input. If mRNA/cDNA is supplied, the software attempts longest ATG-to-stop CDS inference and prioritizes front-CDS guides; source coordinates are reported against the original input."])
         methods.append(["RNAup", "RNAup CLI values are reported only when method is RNAup-cli; otherwise fallback is explicitly labeled."])
         methods.append(["Primers", "T7 primers are PCR primers prefixed with the T7 promoter sequence; verify amplicon uniqueness and primer structure before ordering."])
 
@@ -355,6 +390,10 @@ class ResultExporter:
                 sgrna["sgrna_genomic_pam"],
                 sgrna["sgrna_strand"],
                 sgrna["sgrna_cut_site"],
+                sgrna["sgrna_source_position_start"],
+                sgrna["sgrna_source_position_end"],
+                sgrna["sgrna_cds_region"],
+                sgrna["sgrna_cds_position_percent"],
                 risk["off_target_risk"],
                 risk["risk_score"],
                 sgrna_counts["sgrna_total_ot"],

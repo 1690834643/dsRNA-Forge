@@ -214,15 +214,27 @@ class ResultsPanel(QGroupBox):
             genomic_pam = sgrna.get("genomic_pam", pam)
             strand = sgrna.get("strand", "")
             cut_site = sgrna.get("cut_site", "")
+            source_cut_site = sgrna.get("source_cut_site", "")
+            cut_text = f"{cut_site}"
+            if source_cut_site != "" and source_cut_site != cut_site:
+                cut_text += f" (original {source_cut_site})"
             lines.append("")
             lines.append("sgRNA target:")
             lines.append(
                 f"- PAM {pam}"
                 f"{f' (genomic {genomic_pam})' if genomic_pam and genomic_pam != pam else ''}, "
-                f"strand {strand}, cut site {cut_site}"
+                f"strand {strand}, cut site {cut_text}"
             )
             if sgrna.get("gc_percent") != "":
                 lines.append(f"- Spacer GC {sgrna.get('gc_percent')}%, on-target score {sgrna.get('on_target_score', '')}")
+            if sgrna.get("cds_region"):
+                lines.append(
+                    f"- CDS/input: {sgrna.get('cds_region')} at {sgrna.get('cds_position_percent', '')}% "
+                    f"of design sequence; original coordinates "
+                    f"{sgrna.get('source_position_start', '')}-{sgrna.get('source_position_end', '')}"
+                )
+            for note in (sgrna.get("input_advice") or [])[:2]:
+                lines.append(f"- {note}")
             if mismatch_counts:
                 lines.append(
                     "- OT counts 0M-5M: "

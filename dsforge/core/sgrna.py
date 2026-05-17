@@ -16,11 +16,44 @@ from dsforge.core.sequence import gc_content, has_poly_repeat, normalize_sequenc
 DNA_COMPLEMENT = str.maketrans("ACGTU", "TGCAA")
 VALID_DNA = set("ACGT")
 SGRNA_MISMATCH_BUCKETS = tuple(f"{idx}M" for idx in range(6))
+SGRNA_SEED_INDEX_CHUNKS = ((0, 4), (4, 8), (8, 11), (11, 14), (14, 17), (17, 20))
+STOP_CODONS = {"TAA", "TAG", "TGA"}
 RESTRICTION_ENZYME_SITES = {
     "BsaI": ("GGTCTC", "GAGACC"),
     "BbsI": ("GAAGAC", "GTCTTC"),
     "BsmBI": ("CGTCTC", "GAGACG"),
 }
+
+
+class SgRNAReferenceSites:
+    """Precomputed Cas9 sites plus a no-false-negative chunk index."""
+
+    def __init__(self, sites: List[Dict]):
+        self.sites = sites
+        self.chunk_index: Dict[tuple, List[int]] = {}
+        for idx, site in enumerate(sites):
+            spacer = site.get("spacer_dna", "")
+            if len(spacer) != 20:
+                continue
+            for chunk_id, (start, end) in enumerate(SGRNA_SEED_INDEX_CHUNKS):
+                self.chunk_index.setdefault((chunk_id, spacer[start:end]), []).append(idx)
+
+    def __iter__(self):
+        return iter(self.sites)
+
+    def __len__(self):
+        return len(self.sites)
+
+    def __getitem__(self, idx):
+        return self.sites[idx]
+
+    def candidate_sites(self, spacer: str, max_mismatches: int) -> List[Dict]:
+        if max_mismatches >= len(SGRNA_SEED_INDEX_CHUNKS):
+            return self.sites
+        site_indices = set()
+        for chunk_id, (start, end) in enumerate(SGRNA_SEED_INDEX_CHUNKS):
+            site_indices.update(self.chunk_index.get((chunk_id, spacer[start:end]), ()))
+        return [self.sites[idx] for idx in site_indices]
 
 
 def to_dna(sequence: str) -> str:
@@ -143,6 +176,137 @@ def scan_sgrna_candidates(sequence: str, pam: str = "NGG") -> List[Dict]:
     for rank, candidate in enumerate(candidates, start=1):
         candidate["rank"] = rank
     return candidates
+
+
+def _find_orfs(dna: str, min_orf_nt: int = 90) -> List[Dict]:
+    """Return simple ATG-to-stop ORF candidates on the provided transcript strand."""
+    orfs = []
+    dna_len = len(dna)
+    for frame in range(3):
+        pos = frame
+        while pos <= dna_len - 3:
+            if dna[pos : pos + 3] != "ATG":
+                pos += 3
+                continue
+            stop_pos = None
+            scan = pos + 3
+            while scan <= dna_len - 3:
+                if dna[scan : scan + 3] in STOP_CODONS:
+                    stop_pos = scan + 3
+                    break
+                scan += 3
+            end = stop_pos if stop_pos is not None else dna_len - ((dna_len - pos) % 3)
+            if end - pos >= min_orf_nt:
+                orfs.append({
+                    "start": pos,
+                    "end": end,
+                    "frame": frame,
+                    "length": end - pos,
+                    "has_stop": stop_pos is not None,
+                })
+            pos += 3
+    return orfs
+
+
+def prepare_sgrna_design_sequence(sequence: str, min_orf_nt: int = 90) -> Dict:
+    """Choose the sequence used for sgRNA design and record CDS/mRNA advice.
+
+    If a transcript-like input contains a clear ATG-to-stop ORF, guides are
+    designed on that inferred CDS slice and coordinates are mapped back to the
+    original input. If no confident ORF is found, the full input is retained.
+    """
+    dna = to_dna(sequence)
+    advice = [
+        "sgRNA 设计建议优先提交 CDS 序列；如果输入为 mRNA/cDNA，本工具会尝试用最长 ATG-to-stop ORF 推断 CDS。",
+    ]
+    result = {
+        "design_sequence": dna,
+        "source_start": 0,
+        "source_end": len(dna),
+        "source_length": len(dna),
+        "input_type": "target_fragment",
+        "cds_inferred": False,
+        "uses_cds": False,
+        "orf_frame": None,
+        "orf_has_stop": False,
+        "advice": advice,
+    }
+    if len(dna) < 23 or set(dna) - VALID_DNA:
+        advice.append("未执行 CDS 推断：序列过短或含 N/模糊碱基；请尽量提供 A/C/G/T 明确的 CDS。")
+        return result
+
+    orfs = _find_orfs(dna, min_orf_nt=min_orf_nt)
+    if not orfs:
+        advice.append("未检测到可信 ATG-to-stop CDS；当前按完整输入片段设计，结果需要人工确认是否位于编码区。")
+        return result
+
+    best = max(orfs, key=lambda item: (item["length"], item["has_stop"]))
+    result.update({
+        "design_sequence": dna[best["start"] : best["end"]],
+        "source_start": best["start"],
+        "source_end": best["end"],
+        "input_type": "cds" if best["start"] == 0 and best["end"] == len(dna) else "mrna_inferred_cds",
+        "cds_inferred": best["start"] != 0 or best["end"] != len(dna),
+        "uses_cds": True,
+        "orf_frame": best["frame"],
+        "orf_has_stop": best["has_stop"],
+    })
+    if result["cds_inferred"]:
+        advice.append(
+            f"已从输入 mRNA/cDNA 推断 CDS：原始坐标 {best['start']}-{best['end']}，sgRNA 坐标会映射回原始序列。"
+        )
+    else:
+        advice.append("输入看起来像 CDS；排序会优先推荐 CDS 前段候选。")
+    advice.append("Cas9 knockout 通常优先选择靠前 CDS 外显子/前段 CDS 位点，避开仅位于 UTR 的候选。")
+    return result
+
+
+def annotate_sgrna_cds_priority(candidates: List[Dict], design_info: Dict) -> List[Dict]:
+    """Annotate candidates with CDS-aware coordinates and early-CDS priority."""
+    design_length = max(1, len(design_info.get("design_sequence", "")) or 1)
+    offset = int(design_info.get("source_start", 0) or 0)
+    uses_cds = bool(design_info.get("uses_cds"))
+    annotated = []
+    for candidate in candidates:
+        item = dict(candidate)
+        cut_site = int(item.get("cut_site", item.get("position_start", 0)) or 0)
+        fraction = max(0.0, min(1.0, cut_site / design_length))
+        if fraction <= 0.35:
+            region = "front_cds" if uses_cds else "front_input"
+            bonus = 8.0 if uses_cds else 0.0
+        elif fraction <= 0.65:
+            region = "middle_cds" if uses_cds else "middle_input"
+            bonus = 3.0 if uses_cds else 0.0
+        else:
+            region = "late_cds" if uses_cds else "late_input"
+            bonus = -8.0 if uses_cds else 0.0
+        item.update({
+            "source_position_start": offset + int(item.get("position_start", 0) or 0),
+            "source_position_end": offset + int(item.get("position_end", 0) or 0),
+            "source_pam_start": offset + int(item.get("pam_start", item.get("position_end", 0)) or 0),
+            "source_pam_end": offset + int(item.get("pam_end", item.get("position_end", 0)) or 0),
+            "source_cut_site": offset + cut_site,
+            "cds_position_percent": round(fraction * 100, 1),
+            "cds_region": region,
+            "cds_priority_bonus": bonus,
+            "locus_priority_score": round(float(item.get("on_target_score", 0) or 0) + bonus, 2),
+            "design_input_type": design_info.get("input_type", "target_fragment"),
+            "cds_source_start": design_info.get("source_start", 0),
+            "cds_source_end": design_info.get("source_end", design_info.get("source_length", 0)),
+            "input_advice": list(design_info.get("advice", [])),
+        })
+        annotated.append(item)
+    annotated.sort(
+        key=lambda item: (
+            item.get("locus_priority_score", item.get("on_target_score", 0)),
+            item.get("on_target_score", 0),
+            -abs(50 - item.get("gc_percent", 50)),
+        ),
+        reverse=True,
+    )
+    for rank, item in enumerate(annotated, start=1):
+        item["rank"] = rank
+    return annotated
 
 
 def _mismatch_positions(a: str, b: str) -> List[int]:
@@ -290,6 +454,124 @@ def _risk_from_hits(hits: List[Dict], max_mismatches: int = 5) -> Dict:
     }
 
 
+def build_sgrna_reference_sites(
+    reference_sequences: Dict[str, str],
+    pam: str = "NRG",
+    exclude_target_ids: Optional[Iterable[str]] = None,
+) -> SgRNAReferenceSites:
+    """Pre-scan reference sequences into guide-oriented SpCas9 sites."""
+    excluded = set(exclude_target_ids or set())
+    sites = []
+    for seq_id, raw_seq in reference_sequences.items():
+        if seq_id in excluded:
+            continue
+        seq = to_dna(raw_seq)
+        for possible in _scan_spcas9_sites(seq, pam=pam):
+            item = dict(possible)
+            item["target_id"] = seq_id
+            item["reference_length"] = len(seq)
+            sites.append(item)
+    return SgRNAReferenceSites(sites)
+
+
+def _candidate_reference_locus(candidate: Dict) -> Dict[str, int]:
+    position_start = int(candidate.get("source_position_start", candidate.get("position_start", 0)) or 0)
+    position_end = int(candidate.get("source_position_end", candidate.get("position_end", position_start)) or position_start)
+    pam_start = int(candidate.get("source_pam_start", candidate.get("pam_start", position_end)) or position_end)
+    pam_end = int(candidate.get("source_pam_end", candidate.get("pam_end", pam_start)) or pam_start)
+    return {
+        "position_start": position_start,
+        "position_end": position_end,
+        "pam_start": pam_start,
+        "pam_end": pam_end,
+        "locus_start": min(position_start, pam_start),
+        "locus_end": max(position_end, pam_end),
+    }
+
+
+def score_sgrna_offtargets_from_sites(
+    candidate: Dict,
+    reference_sites,
+    exclude_target_id: Optional[str] = None,
+    exclude_target_ids: Optional[Iterable[str]] = None,
+    max_mismatches: int = 5,
+) -> Dict:
+    """Score a guide against precomputed SpCas9 NRG reference sites."""
+    spacer = to_dna(candidate["spacer_dna"])
+    seed_12 = spacer[-12:]
+    intended = _candidate_reference_locus(candidate)
+    intended_strand = candidate.get("strand")
+    hits = []
+    fully_excluded_ids = set(exclude_target_ids or set())
+    if exclude_target_id in fully_excluded_ids:
+        fully_excluded_ids.remove(exclude_target_id)
+    if hasattr(reference_sites, "candidate_sites"):
+        possible_sites = reference_sites.candidate_sites(spacer, max_mismatches)
+    else:
+        possible_sites = reference_sites
+    for possible in possible_sites:
+        seq_id = possible["target_id"]
+        if seq_id in fully_excluded_ids:
+            continue
+        possible_locus_start = min(possible["position_start"], possible["pam_start"])
+        possible_locus_end = max(possible["position_end"], possible["pam_end"])
+        overlaps_intended_locus = (
+            seq_id == exclude_target_id
+            and max(intended["locus_start"], possible_locus_start) < min(intended["locus_end"], possible_locus_end)
+        )
+        is_intended_site = (
+            seq_id == exclude_target_id
+            and possible.get("position_start") == intended["position_start"]
+            and possible.get("strand") == intended_strand
+        )
+        if is_intended_site or overlaps_intended_locus:
+            continue
+        target_spacer = possible["spacer_dna"]
+        mismatches = _mismatch_positions(spacer, target_spacer)
+        if len(mismatches) > max_mismatches:
+            continue
+        cfd = _cfd_like_score(mismatches)
+        seed_12_match = target_spacer[-12:] == seed_12
+        mismatch_floor = {0: 100.0, 1: 72.0, 2: 45.0, 3: 24.0, 4: 8.0, 5: 4.0}.get(len(mismatches), 0.0)
+        risk_score = max(cfd, mismatch_floor)
+        if seed_12_match:
+            risk_score += 18
+        if possible["pam"][1] == "A":
+            risk_score *= 0.85
+        risk_score = round(risk_score, 2)
+        reasons = [f"{len(mismatches)} mismatch Cas9 site", f"PAM {possible['pam']}"]
+        if possible["pam"][1] == "A":
+            reasons.append("alternative NRG/NAG PAM")
+        if seed_12_match:
+            reasons.append("12 nt PAM-proximal seed match")
+        if any(pos >= 13 for pos in mismatches):
+            reasons.append("PAM-proximal mismatch")
+        if not mismatches:
+            reasons.append("perfect spacer match")
+        reference_length = int(possible.get("reference_length", 0) or 0)
+        validation_start = max(0, min(possible["position_start"], possible["pam_start"]) - 100)
+        validation_end = min(reference_length, max(possible["position_end"], possible["pam_end"]) + 100)
+        hits.append({
+            "target_id": seq_id,
+            "risk_score": min(100.0, risk_score),
+            "cfd_like_score": cfd,
+            "mismatches": len(mismatches),
+            "mismatch_positions": mismatches,
+            "pam": possible["pam"],
+            "genomic_pam": possible.get("genomic_pam", possible["pam"]),
+            "strand": possible["strand"],
+            "position": possible["position_start"],
+            "cut_site": possible["cut_site"],
+            "target_spacer": target_spacer,
+            "target_protospacer_pam": target_spacer + possible["pam"],
+            "seed_12_match": seed_12_match,
+            "validation_window_start": validation_start,
+            "validation_window_end": validation_end,
+            "reasons": reasons,
+        })
+    return _risk_from_hits(hits, max_mismatches=max_mismatches)
+
+
 def score_sgrna_offtargets(
     candidate: Dict,
     reference_sequences: Dict[str, str],
@@ -298,83 +580,16 @@ def score_sgrna_offtargets(
     max_mismatches: int = 5,
 ) -> Dict:
     """Search SpCas9 NRG-adjacent off-targets with <= max_mismatches mismatches."""
-    spacer = to_dna(candidate["spacer_dna"])
-    seed_12 = spacer[-12:]
-    intended_start = candidate.get("position_start")
-    intended_strand = candidate.get("strand")
-    intended_locus_start = min(
-        int(candidate.get("position_start", 0) or 0),
-        int(candidate.get("pam_start", candidate.get("position_start", 0)) or 0),
-    )
-    intended_locus_end = max(
-        int(candidate.get("position_end", intended_locus_start) or intended_locus_start),
-        int(candidate.get("pam_end", candidate.get("position_end", intended_locus_start)) or intended_locus_start),
-    )
-    hits = []
     fully_excluded_ids = set(exclude_target_ids or set())
     if exclude_target_id in fully_excluded_ids:
         fully_excluded_ids.remove(exclude_target_id)
-    for seq_id, raw_seq in reference_sequences.items():
-        if seq_id in fully_excluded_ids:
-            continue
-        seq = to_dna(raw_seq)
-        for possible in _scan_spcas9_sites(seq, pam="NRG"):
-            possible_locus_start = min(possible["position_start"], possible["pam_start"])
-            possible_locus_end = max(possible["position_end"], possible["pam_end"])
-            overlaps_intended_locus = (
-                seq_id == exclude_target_id
-                and max(intended_locus_start, possible_locus_start) < min(intended_locus_end, possible_locus_end)
-            )
-            is_intended_site = (
-                seq_id == exclude_target_id
-                and possible.get("position_start") == intended_start
-                and possible.get("strand") == intended_strand
-            )
-            if is_intended_site or overlaps_intended_locus:
-                continue
-            target_spacer = possible["spacer_dna"]
-            mismatches = _mismatch_positions(spacer, target_spacer)
-            if len(mismatches) > max_mismatches:
-                continue
-            cfd = _cfd_like_score(mismatches)
-            seed_12_match = target_spacer[-12:] == seed_12
-            mismatch_floor = {0: 100.0, 1: 72.0, 2: 45.0, 3: 24.0, 4: 8.0, 5: 4.0}.get(len(mismatches), 0.0)
-            risk_score = max(cfd, mismatch_floor)
-            if seed_12_match:
-                risk_score += 18
-            if possible["pam"][1] == "A":
-                risk_score *= 0.85
-            risk_score = round(risk_score, 2)
-            reasons = [f"{len(mismatches)} mismatch Cas9 site", f"PAM {possible['pam']}"]
-            if possible["pam"][1] == "A":
-                reasons.append("alternative NRG/NAG PAM")
-            if seed_12_match:
-                reasons.append("12 nt PAM-proximal seed match")
-            if any(pos >= 13 for pos in mismatches):
-                reasons.append("PAM-proximal mismatch")
-            if not mismatches:
-                reasons.append("perfect spacer match")
-            validation_start = max(0, min(possible["position_start"], possible["pam_start"]) - 100)
-            validation_end = min(len(seq), max(possible["position_end"], possible["pam_end"]) + 100)
-            hits.append({
-                "target_id": seq_id,
-                "risk_score": min(100.0, risk_score),
-                "cfd_like_score": cfd,
-                "mismatches": len(mismatches),
-                "mismatch_positions": mismatches,
-                "pam": possible["pam"],
-                "genomic_pam": possible.get("genomic_pam", possible["pam"]),
-                "strand": possible["strand"],
-                "position": possible["position_start"],
-                "cut_site": possible["cut_site"],
-                "target_spacer": target_spacer,
-                "target_protospacer_pam": target_spacer + possible["pam"],
-                "seed_12_match": seed_12_match,
-                "validation_window_start": validation_start,
-                "validation_window_end": validation_end,
-                "reasons": reasons,
-            })
-    return _risk_from_hits(hits, max_mismatches=max_mismatches)
+    reference_sites = build_sgrna_reference_sites(reference_sequences, exclude_target_ids=fully_excluded_ids)
+    return score_sgrna_offtargets_from_sites(
+        candidate,
+        reference_sites,
+        exclude_target_id=exclude_target_id,
+        max_mismatches=max_mismatches,
+    )
 
 
 def _restriction_site_warnings(spacer: str) -> List[Dict]:

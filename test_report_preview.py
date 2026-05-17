@@ -681,7 +681,7 @@ def generate_html(result, output_path="report.html"):
                 </div>
                 <div class="header-meta-item">
                     <span>📦</span>
-                    <span>版本: v0.1.1</span>
+                    <span>版本: v0.1.2</span>
                 </div>
                 <div class="header-meta-item">
                     <span>⏱️</span>
@@ -834,7 +834,7 @@ def generate_html(result, output_path="report.html"):
     <footer class="report-footer">
         <div class="footer-brand">
             <span>🧬</span>
-            <span>dsRNA-Forge v0.1.1</span>
+            <span>dsRNA-Forge v0.1.2</span>
         </div>
         <div class="footer-links">
             <a href="https://github.com/dsRNA-Forge">GitHub</a>
